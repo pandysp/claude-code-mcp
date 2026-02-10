@@ -13,10 +13,21 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
-import { readFileSync } from 'node:fs';
 
 // Server version - update this when releasing new versions
-const SERVER_VERSION = "1.10.12";
+const SERVER_VERSION = "1.11.0";
+
+/**
+ * Structured output from `claude -p --output-format json`
+ */
+interface ClaudeJsonOutput {
+  type: string;
+  session_id: string;
+  result: string;
+  is_error: boolean;
+  duration_ms: number;
+  total_cost_usd: number;
+}
 
 // Define debugMode globally using const
 const debugMode = process.env.MCP_CLAUDE_DEBUG === 'true';
@@ -83,11 +94,34 @@ export function findClaudeCli(): string {
 }
 
 /**
- * Interface for Claude Code tool arguments
+ * Parse Claude CLI JSON output, extracting session_id and result text.
+ * Falls back to raw text if JSON parsing fails.
  */
-interface ClaudeCodeArgs {
-  prompt: string;
-  workFolder?: string;
+function parseClaudeOutput(stdout: string): { resultText: string; sessionId?: string; isError?: boolean } {
+  try {
+    const parsed: ClaudeJsonOutput = JSON.parse(stdout);
+    return {
+      resultText: parsed.result,
+      sessionId: parsed.session_id,
+      isError: parsed.is_error,
+    };
+  } catch {
+    // Fall back to raw text if JSON parsing fails
+    return { resultText: stdout };
+  }
+}
+
+/**
+ * Build the MCP response with optional structuredContent containing threadId.
+ */
+function buildResponse(resultText: string, sessionId?: string): ServerResult {
+  const response: ServerResult = {
+    content: [{ type: 'text', text: resultText }],
+  };
+  if (sessionId) {
+    (response as any).structuredContent = { threadId: sessionId, content: resultText };
+  }
+  return response;
 }
 
 // Ensure spawnAsync is defined correctly *before* the class
@@ -229,7 +263,25 @@ export class ClaudeCodeServer {
             },
             required: ['prompt'],
           },
-        }
+        },
+        {
+          name: 'claude_code_reply',
+          description: 'Continue a Claude Code conversation by providing the thread ID and a new prompt. Use this to send follow-up instructions that build on prior context from a previous claude_code call.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              threadId: {
+                type: 'string',
+                description: 'The thread/session ID from a previous claude_code or claude_code_reply call.',
+              },
+              prompt: {
+                type: 'string',
+                description: 'The follow-up prompt to continue the conversation.',
+              },
+            },
+            required: ['threadId', 'prompt'],
+          },
+        },
       ],
     }));
 
@@ -239,17 +291,61 @@ export class ClaudeCodeServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (args, call): Promise<ServerResult> => {
       debugLog('[Debug] Handling CallToolRequest:', args);
 
-      // Correctly access toolName from args.params.name
       const toolName = args.params.name;
-      if (toolName !== 'claude_code') {
-        // ErrorCode.ToolNotFound should be ErrorCode.MethodNotFound as per SDK for tools
+      const toolArguments = args.params.arguments;
+
+      if (toolName !== 'claude_code' && toolName !== 'claude_code_reply') {
         throw new McpError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
       }
 
-      // Robustly access prompt from args.params.arguments
-      const toolArguments = args.params.arguments;
-      let prompt: string;
+      // Print tool info on first use
+      if (isFirstToolUse) {
+        const versionInfo = `claude_code v${SERVER_VERSION} started at ${serverStartupTime}`;
+        console.error(versionInfo);
+        isFirstToolUse = false;
+      }
 
+      // --- claude_code_reply ---
+      if (toolName === 'claude_code_reply') {
+        const threadId = toolArguments?.threadId;
+        const prompt = toolArguments?.prompt;
+
+        if (!threadId || typeof threadId !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid required parameter: threadId');
+        }
+        if (!prompt || typeof prompt !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid required parameter: prompt');
+        }
+
+        try {
+          debugLog(`[Debug] Resuming session ${threadId} with prompt: "${prompt}"`);
+          const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', '--output-format', 'json', '--resume', threadId, prompt];
+          debugLog(`[Debug] Invoking Claude CLI: ${this.claudeCliPath} ${claudeProcessArgs.join(' ')}`);
+
+          const { stdout, stderr } = await spawnAsync(
+            this.claudeCliPath,
+            claudeProcessArgs,
+            { timeout: executionTimeoutMs, cwd: homedir() }
+          );
+
+          debugLog('[Debug] Claude CLI stdout:', stdout.trim());
+          if (stderr) debugLog('[Debug] Claude CLI stderr:', stderr.trim());
+
+          const { resultText, sessionId } = parseClaudeOutput(stdout);
+          return buildResponse(resultText, sessionId);
+
+        } catch (error: any) {
+          debugLog('[Error] Error executing Claude CLI (reply):', error);
+          let errorMessage = error.message || 'Unknown error';
+          if (error.signal === 'SIGTERM' || error.message?.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
+            throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
+          }
+          throw new McpError(ErrorCode.InternalError, `Claude CLI execution failed: ${errorMessage}`);
+        }
+      }
+
+      // --- claude_code ---
+      let prompt: string;
       if (
         toolArguments &&
         typeof toolArguments === 'object' &&
@@ -262,14 +358,12 @@ export class ClaudeCodeServer {
       }
 
       // Determine the working directory
-      let effectiveCwd = homedir(); // Default CWD is user's home directory
+      let effectiveCwd = homedir();
 
-      // Check if workFolder is provided in the tool arguments
       if (toolArguments.workFolder && typeof toolArguments.workFolder === 'string') {
         const resolvedCwd = pathResolve(toolArguments.workFolder);
         debugLog(`[Debug] Specified workFolder: ${toolArguments.workFolder}, Resolved to: ${resolvedCwd}`);
 
-        // Check if the resolved path exists
         if (existsSync(resolvedCwd)) {
           effectiveCwd = resolvedCwd;
           debugLog(`[Debug] Using workFolder as CWD: ${effectiveCwd}`);
@@ -283,46 +377,30 @@ export class ClaudeCodeServer {
       try {
         debugLog(`[Debug] Attempting to execute Claude CLI with prompt: "${prompt}" in CWD: "${effectiveCwd}"`);
 
-        // Print tool info on first use
-        if (isFirstToolUse) {
-          const versionInfo = `claude_code v${SERVER_VERSION} started at ${serverStartupTime}`;
-          console.error(versionInfo);
-          isFirstToolUse = false;
-        }
-
-        const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', prompt];
+        const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', '--output-format', 'json', prompt];
         debugLog(`[Debug] Invoking Claude CLI: ${this.claudeCliPath} ${claudeProcessArgs.join(' ')}`);
 
         const { stdout, stderr } = await spawnAsync(
-          this.claudeCliPath, // Run the Claude CLI directly
-          claudeProcessArgs, // Pass the arguments
+          this.claudeCliPath,
+          claudeProcessArgs,
           { timeout: executionTimeoutMs, cwd: effectiveCwd }
         );
 
         debugLog('[Debug] Claude CLI stdout:', stdout.trim());
-        if (stderr) {
-          debugLog('[Debug] Claude CLI stderr:', stderr.trim());
-        }
+        if (stderr) debugLog('[Debug] Claude CLI stderr:', stderr.trim());
 
-        // Return stdout content, even if there was stderr, as claude-cli might output main result to stdout.
-        return { content: [{ type: 'text', text: stdout }] };
+        const { resultText, sessionId } = parseClaudeOutput(stdout);
+        return buildResponse(resultText, sessionId);
 
       } catch (error: any) {
         debugLog('[Error] Error executing Claude CLI:', error);
         let errorMessage = error.message || 'Unknown error';
-        // Attempt to include stderr and stdout from the error object if spawnAsync attached them
-        if (error.stderr) {
-          errorMessage += `\nStderr: ${error.stderr}`;
-        }
-        if (error.stdout) {
-          errorMessage += `\nStdout: ${error.stdout}`;
-        }
+        if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;
+        if (error.stdout) errorMessage += `\nStdout: ${error.stdout}`;
 
-        if (error.signal === 'SIGTERM' || (error.message && error.message.includes('ETIMEDOUT')) || (error.code === 'ETIMEDOUT')) {
-          // Reverting to InternalError due to lint issues, but with a specific timeout message.
+        if (error.signal === 'SIGTERM' || error.message?.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
           throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
         }
-        // ErrorCode.ToolCallFailed should be ErrorCode.InternalError or a more specific execution error if available
         throw new McpError(ErrorCode.InternalError, `Claude CLI execution failed: ${errorMessage}`);
       }
     });

@@ -434,9 +434,11 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const handler = listToolsCall[1];
       const result = await handler();
       
-      expect(result.tools).toHaveLength(1);
+      expect(result.tools).toHaveLength(2);
       expect(result.tools[0].name).toBe('claude_code');
       expect(result.tools[0].description).toContain('Claude Code Agent');
+      expect(result.tools[1].name).toBe('claude_code_reply');
+      expect(result.tools[1].description).toContain('Continue a Claude Code conversation');
     });
 
     it('should handle CallToolRequest', async () => {

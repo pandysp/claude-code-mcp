@@ -1,7 +1,7 @@
 {
-  "name": "@steipete/claude-code-mcp",
-  "version": "1.10.12",
-  "description": "Simple MCP server for Claude Code one-shot execution",
+  "name": "@pandysp/claude-code-mcp",
+  "version": "1.11.0",
+  "description": "MCP server for Claude Code with session support (fork of @steipete/claude-code-mcp)",
   "author": "Peter Steinberger",
   "license": "MIT",
   "main": "dist/server.js",
