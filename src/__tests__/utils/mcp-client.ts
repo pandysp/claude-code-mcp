@@ -17,6 +17,7 @@ export interface MCPResponse {
  */
 export class MCPTestClient extends EventEmitter {
   private server: ChildProcess | null = null;
+  private serverExited = false;
   private requestId = 0;
   private pendingRequests = new Map<number, {
     resolve: (response: MCPResponse) => void;
@@ -30,8 +31,12 @@ export class MCPTestClient extends EventEmitter {
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Strip all vitest env vars so the server's VITEST guard doesn't suppress startup
+      const cleanEnv = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !key.startsWith('VITEST'))
+      );
       this.server = spawn('node', [this.serverPath], {
-        env: { ...process.env, ...this.env },
+        env: { ...cleanEnv, ...this.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -47,6 +52,18 @@ export class MCPTestClient extends EventEmitter {
         reject(error);
       });
 
+      this.server.on('exit', (code, signal) => {
+        this.serverExited = true;
+        // Reject all pending requests when server exits unexpectedly
+        const exitError = new Error(
+          `Server exited unexpectedly (code=${code}, signal=${signal})`
+        );
+        for (const [id, pending] of this.pendingRequests) {
+          this.pendingRequests.delete(id);
+          pending.reject(exitError);
+        }
+      });
+
       this.server.on('spawn', () => {
         resolve();
       });
@@ -55,10 +72,12 @@ export class MCPTestClient extends EventEmitter {
 
   async disconnect(): Promise<void> {
     if (this.server) {
-      this.server.kill();
-      await new Promise((resolve) => {
-        this.server!.on('exit', resolve);
-      });
+      if (!this.serverExited) {
+        this.server.kill();
+        await new Promise<void>((resolve) => {
+          this.server!.on('exit', () => resolve());
+        });
+      }
       this.server = null;
     }
   }
@@ -80,7 +99,11 @@ export class MCPTestClient extends EventEmitter {
           this.emit('notification', response);
         }
       } catch (error) {
-        console.error('Failed to parse response:', line, error);
+        // Surface parse errors to pending requests instead of silently swallowing
+        const parseError = new Error(
+          `Failed to parse server response: ${line.substring(0, 200)}`
+        );
+        this.emit('parseError', parseError);
       }
     }
   }
@@ -96,9 +119,9 @@ export class MCPTestClient extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
-      
+
       this.server?.stdin?.write(JSON.stringify(request) + '\n');
-      
+
       // Timeout after 30 seconds
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
@@ -114,11 +137,11 @@ export class MCPTestClient extends EventEmitter {
       name,
       arguments: args,
     });
-    
+
     if (response.error) {
       throw new Error(`Tool call failed: ${response.error.message}`);
     }
-    
+
     return response.result?.content;
   }
 

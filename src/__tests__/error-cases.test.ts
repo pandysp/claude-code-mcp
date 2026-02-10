@@ -17,15 +17,18 @@ vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
 vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
   ListToolsRequestSchema: { name: 'listTools' },
   CallToolRequestSchema: { name: 'callTool' },
-  ErrorCode: { 
-    InternalError: 'InternalError',
-    MethodNotFound: 'MethodNotFound'
+  ErrorCode: {
+    InternalError: -32603,
+    MethodNotFound: -32601,
+    InvalidParams: -32602,
   },
-  McpError: vi.fn().mockImplementation((code, message) => {
-    const error = new Error(message);
-    (error as any).code = code;
-    return error;
-  })
+  McpError: class McpError extends Error {
+    code: number;
+    constructor(code: number, message: string) {
+      super(message);
+      this.code = code;
+    }
+  },
 }));
 
 const mockExistsSync = vi.mocked(existsSync);
@@ -35,6 +38,7 @@ const mockHomedir = vi.mocked(homedir);
 describe('Error Handling Tests', () => {
   let consoleErrorSpy: any;
   let originalEnv: any;
+  let sigintListenersBefore: Function[];
   let errorHandler: any = null;
 
   function setupServerMock() {
@@ -57,16 +61,26 @@ describe('Error Handling Tests', () => {
   }
 
   beforeEach(() => {
+    sigintListenersBefore = process.listeners('SIGINT').slice();
     vi.clearAllMocks();
     vi.resetModules();
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     originalEnv = { ...process.env };
     process.env = { ...originalEnv };
+    // Defense-in-depth: if guard is ever removed, module loading won't crash
+    mockHomedir.mockReturnValue('/home/user');
+    mockExistsSync.mockReturnValue(false);
   });
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
     process.env = originalEnv;
+    // Remove only SIGINT listeners added during this test
+    for (const listener of process.listeners('SIGINT')) {
+      if (!sigintListenersBefore.includes(listener)) {
+        process.removeListener('SIGINT', listener as (...args: any[]) => void);
+      }
+    }
   });
 
   describe('CallToolRequest Error Cases', () => {
@@ -153,11 +167,9 @@ describe('Error Handling Tests', () => {
         });
         expect.fail('Should have thrown');
       } catch (err: any) {
-        // Check if McpError was called with the timeout message
-        expect(McpError).toHaveBeenCalledWith(
-          'InternalError',
-          expect.stringMatching(/Claude CLI command timed out/)
-        );
+        expect(err).toBeInstanceOf(McpError);
+        expect(err.code).toBe(-32603);
+        expect(err.message).toMatch(/Claude CLI command timed out/);
       }
     });
 

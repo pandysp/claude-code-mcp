@@ -451,6 +451,13 @@ export class ClaudeCodeServer {
   }
 }
 
-// Create and run the server if this is the main module
-const server = new ClaudeCodeServer();
-server.run().catch(console.error);
+// Create and run the server unless under vitest (tests instantiate manually).
+// When VITEST is set, skip auto-start so tests can control instantiation.
+// If this guard incorrectly fires in production, check for VITEST in the environment.
+if (!process.env.VITEST) {
+  const server = new ClaudeCodeServer();
+  server.run().catch((error) => {
+    console.error('[Fatal] Server failed to start:', error);
+    process.exit(1);
+  });
+}

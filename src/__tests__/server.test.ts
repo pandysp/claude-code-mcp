@@ -15,15 +15,17 @@ vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
   ListToolsRequestSchema: { name: 'listTools' },
   CallToolRequestSchema: { name: 'callTool' },
   ErrorCode: {
-    InternalError: 'InternalError',
-    MethodNotFound: 'MethodNotFound',
-    InvalidParams: 'InvalidParams',
+    InternalError: -32603,
+    MethodNotFound: -32601,
+    InvalidParams: -32602,
   },
-  McpError: vi.fn().mockImplementation((code, message) => {
-    const error = new Error(message);
-    (error as any).code = code;
-    return error;
-  })
+  McpError: class McpError extends Error {
+    code: number;
+    constructor(code: number, message: string) {
+      super(message);
+      this.code = code;
+    }
+  },
 }));
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
   Server: vi.fn().mockImplementation(function() {
@@ -52,8 +54,10 @@ describe('ClaudeCodeServer Unit Tests', () => {
   let consoleErrorSpy: any;
   let consoleWarnSpy: any;
   let originalEnv: any;
+  let sigintListenersBefore: Function[];
 
   beforeEach(() => {
+    sigintListenersBefore = process.listeners('SIGINT').slice();
     vi.clearAllMocks();
     vi.resetModules();
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -61,12 +65,21 @@ describe('ClaudeCodeServer Unit Tests', () => {
     originalEnv = { ...process.env };
     // Reset env
     process.env = { ...originalEnv };
+    // Defense-in-depth: if guard is ever removed, module loading won't crash
+    mockHomedir.mockReturnValue('/home/user');
+    mockExistsSync.mockReturnValue(false);
   });
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
     consoleWarnSpy.mockRestore();
     process.env = originalEnv;
+    // Remove only SIGINT listeners added during this test
+    for (const listener of process.listeners('SIGINT')) {
+      if (!sigintListenersBefore.includes(listener)) {
+        process.removeListener('SIGINT', listener as (...args: any[]) => void);
+      }
+    }
   });
 
   describe('debugLog function', () => {
