@@ -95,33 +95,72 @@ export function findClaudeCli(): string {
 
 /**
  * Parse Claude CLI JSON output, extracting session_id and result text.
- * Falls back to raw text if JSON parsing fails.
+ * Falls back to raw text if JSON parsing fails, with a warning logged.
  */
-function parseClaudeOutput(stdout: string): { resultText: string; sessionId?: string; isError?: boolean } {
+export function parseClaudeOutput(stdout: string): { resultText: string; sessionId?: string; isError?: boolean } {
   try {
-    const parsed: ClaudeJsonOutput = JSON.parse(stdout);
+    const parsed = JSON.parse(stdout);
+    if (typeof parsed.result !== 'string') {
+      console.error(
+        `[Warning] Claude CLI JSON output missing 'result' field. ` +
+        `Keys found: ${Object.keys(parsed).join(', ')}. Falling back to raw output.`
+      );
+      return { resultText: stdout };
+    }
     return {
       resultText: parsed.result,
-      sessionId: parsed.session_id,
-      isError: parsed.is_error,
+      sessionId: typeof parsed.session_id === 'string' ? parsed.session_id : undefined,
+      isError: typeof parsed.is_error === 'boolean' ? parsed.is_error : undefined,
     };
-  } catch {
-    // Fall back to raw text if JSON parsing fails
+  } catch (e) {
+    console.error(
+      `[Warning] Failed to parse Claude CLI JSON output. ` +
+      `Session continuity will not work for this response. ` +
+      `This may indicate the CLI does not support --output-format json. ` +
+      `Parse error: ${e instanceof Error ? e.message : String(e)}. ` +
+      `Raw output (first 200 chars): ${stdout.slice(0, 200)}`
+    );
     return { resultText: stdout };
   }
 }
 
 /**
  * Build the MCP response with optional structuredContent containing threadId.
+ *
+ * NOTE: `structuredContent` is NOT part of the official MCP spec. It is an
+ * extension consumed by OpenClaw's multi-agent system to enable session
+ * threading across tool calls. Other MCP clients will ignore it.
  */
-function buildResponse(resultText: string, sessionId?: string): ServerResult {
+export function buildResponse(resultText: string, sessionId?: string, isError?: boolean): ServerResult {
   const response: ServerResult = {
     content: [{ type: 'text', text: resultText }],
+    isError: isError ?? false,
   };
   if (sessionId) {
     (response as any).structuredContent = { threadId: sessionId, content: resultText };
   }
   return response;
+}
+
+/**
+ * Resolve the effective CWD from a workFolder argument.
+ * Throws InvalidParams if the specified directory does not exist.
+ */
+function resolveWorkFolder(workFolder?: unknown): string {
+  if (workFolder && typeof workFolder === 'string') {
+    const resolvedCwd = pathResolve(workFolder);
+    debugLog(`[Debug] Specified workFolder: ${workFolder}, Resolved to: ${resolvedCwd}`);
+    if (existsSync(resolvedCwd)) {
+      debugLog(`[Debug] Using workFolder as CWD: ${resolvedCwd}`);
+      return resolvedCwd;
+    }
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Specified workFolder does not exist: ${resolvedCwd}`
+    );
+  }
+  debugLog(`[Debug] No workFolder provided, using default CWD: ${homedir()}`);
+  return homedir();
 }
 
 // Ensure spawnAsync is defined correctly *before* the class
@@ -266,7 +305,7 @@ export class ClaudeCodeServer {
         },
         {
           name: 'claude_code_reply',
-          description: 'Continue a Claude Code conversation by providing the thread ID and a new prompt. Use this to send follow-up instructions that build on prior context from a previous claude_code call.',
+          description: 'Continue a Claude Code conversation by providing the thread ID and a new prompt. Use this to send follow-up instructions that build on prior context from a previous claude_code call. If the original call used a workFolder, provide the same workFolder here to maintain execution context.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -277,6 +316,10 @@ export class ClaudeCodeServer {
               prompt: {
                 type: 'string',
                 description: 'The follow-up prompt to continue the conversation.',
+              },
+              workFolder: {
+                type: 'string',
+                description: 'The working directory for execution. Should match the workFolder from the original claude_code call. Must be an absolute path.',
               },
             },
             required: ['threadId', 'prompt'],
@@ -317,26 +360,31 @@ export class ClaudeCodeServer {
           throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid required parameter: prompt');
         }
 
+        const effectiveCwd = resolveWorkFolder(toolArguments?.workFolder);
+
         try {
-          debugLog(`[Debug] Resuming session ${threadId} with prompt: "${prompt}"`);
+          debugLog(`[Debug] Resuming session ${threadId} with prompt: "${prompt}" in CWD: "${effectiveCwd}"`);
           const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', '--output-format', 'json', '--resume', threadId, prompt];
           debugLog(`[Debug] Invoking Claude CLI: ${this.claudeCliPath} ${claudeProcessArgs.join(' ')}`);
 
           const { stdout, stderr } = await spawnAsync(
             this.claudeCliPath,
             claudeProcessArgs,
-            { timeout: executionTimeoutMs, cwd: homedir() }
+            { timeout: executionTimeoutMs, cwd: effectiveCwd }
           );
 
           debugLog('[Debug] Claude CLI stdout:', stdout.trim());
           if (stderr) debugLog('[Debug] Claude CLI stderr:', stderr.trim());
 
-          const { resultText, sessionId } = parseClaudeOutput(stdout);
-          return buildResponse(resultText, sessionId);
+          const { resultText, sessionId, isError } = parseClaudeOutput(stdout);
+          return buildResponse(resultText, sessionId, isError);
 
         } catch (error: any) {
+          if (error instanceof McpError) throw error;
           debugLog('[Error] Error executing Claude CLI (reply):', error);
           let errorMessage = error.message || 'Unknown error';
+          if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;
+          if (error.stdout) errorMessage += `\nStdout: ${error.stdout}`;
           if (error.signal === 'SIGTERM' || error.message?.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
             throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
           }
@@ -357,22 +405,7 @@ export class ClaudeCodeServer {
         throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid required parameter: prompt (must be an object with a string "prompt" property) for claude_code tool');
       }
 
-      // Determine the working directory
-      let effectiveCwd = homedir();
-
-      if (toolArguments.workFolder && typeof toolArguments.workFolder === 'string') {
-        const resolvedCwd = pathResolve(toolArguments.workFolder);
-        debugLog(`[Debug] Specified workFolder: ${toolArguments.workFolder}, Resolved to: ${resolvedCwd}`);
-
-        if (existsSync(resolvedCwd)) {
-          effectiveCwd = resolvedCwd;
-          debugLog(`[Debug] Using workFolder as CWD: ${effectiveCwd}`);
-        } else {
-          debugLog(`[Warning] Specified workFolder does not exist: ${resolvedCwd}. Using default: ${effectiveCwd}`);
-        }
-      } else {
-        debugLog(`[Debug] No workFolder provided, using default CWD: ${effectiveCwd}`);
-      }
+      const effectiveCwd = resolveWorkFolder(toolArguments.workFolder);
 
       try {
         debugLog(`[Debug] Attempting to execute Claude CLI with prompt: "${prompt}" in CWD: "${effectiveCwd}"`);
@@ -389,10 +422,11 @@ export class ClaudeCodeServer {
         debugLog('[Debug] Claude CLI stdout:', stdout.trim());
         if (stderr) debugLog('[Debug] Claude CLI stderr:', stderr.trim());
 
-        const { resultText, sessionId } = parseClaudeOutput(stdout);
-        return buildResponse(resultText, sessionId);
+        const { resultText, sessionId, isError } = parseClaudeOutput(stdout);
+        return buildResponse(resultText, sessionId, isError);
 
       } catch (error: any) {
+        if (error instanceof McpError) throw error;
         debugLog('[Error] Error executing Claude CLI:', error);
         let errorMessage = error.message || 'Unknown error';
         if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;

@@ -14,9 +14,10 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
 vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
   ListToolsRequestSchema: { name: 'listTools' },
   CallToolRequestSchema: { name: 'callTool' },
-  ErrorCode: { 
+  ErrorCode: {
     InternalError: 'InternalError',
-    MethodNotFound: 'MethodNotFound'
+    MethodNotFound: 'MethodNotFound',
+    InvalidParams: 'InvalidParams',
   },
   McpError: vi.fn().mockImplementation((code, message) => {
     const error = new Error(message);
@@ -487,54 +488,288 @@ describe('ClaudeCodeServer Unit Tests', () => {
         }
       });
       
-      // Simulate successful execution
+      // Simulate successful execution with JSON output
+      const jsonOutput = JSON.stringify({
+        type: 'result',
+        session_id: 'test-session-123',
+        result: 'tool output',
+        is_error: false,
+        duration_ms: 1000,
+        total_cost_usd: 0.01,
+      });
       setTimeout(() => {
-        mockProcess.stdout['data']('tool output');
+        mockProcess.stdout['data'](jsonOutput);
         mockProcess.emit('close', 0);
       }, 10);
-      
+
       const result = await promise;
       expect(result.content[0].type).toBe('text');
       expect(result.content[0].text).toBe('tool output');
+      expect((result as any).structuredContent).toEqual({
+        threadId: 'test-session-123',
+        content: 'tool output',
+      });
     });
 
-    it('should handle non-existent workFolder', async () => {
+    it('should handle claude_code_reply with valid threadId', async () => {
       mockHomedir.mockReturnValue('/home/user');
-      mockExistsSync.mockImplementation((path) => {
-        // Make the CLI path exist but the workFolder not exist
-        if (String(path).includes('.claude')) return true;
-        if (path === '/nonexistent') return false;
-        return false;
-      });
-      
-      // Enable debug mode to see warning messages
-      process.env.MCP_CLAUDE_DEBUG = 'true';
-      
-      // Set up Server mock
+      mockExistsSync.mockReturnValue(true);
+
       setupServerMock();
-      
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       const server = new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
-      // Find the CallToolRequest handler
+
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
       );
-      
+
       const handler = callToolCall[1];
-      
-      // Create mock response
+
       const mockProcess = new EventEmitter() as any;
       mockProcess.stdout = new EventEmitter();
       mockProcess.stderr = new EventEmitter();
-      mockProcess.stdout.on = vi.fn();
-      mockProcess.stderr.on = vi.fn();
+      mockProcess.stdout.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stdout['data'] = handler;
+      });
+      mockProcess.stderr.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stderr['data'] = handler;
+      });
       mockSpawn.mockReturnValue(mockProcess);
-      
+
       const promise = handler({
+        params: {
+          name: 'claude_code_reply',
+          arguments: {
+            threadId: 'session-abc-123',
+            prompt: 'follow up question',
+          }
+        }
+      });
+
+      const jsonOutput = JSON.stringify({
+        type: 'result',
+        session_id: 'session-abc-123',
+        result: 'follow up answer',
+        is_error: false,
+        duration_ms: 500,
+        total_cost_usd: 0.005,
+      });
+      setTimeout(() => {
+        mockProcess.stdout['data'](jsonOutput);
+        mockProcess.emit('close', 0);
+      }, 10);
+
+      const result = await promise;
+      expect(result.content[0].text).toBe('follow up answer');
+      expect((result as any).structuredContent).toEqual({
+        threadId: 'session-abc-123',
+        content: 'follow up answer',
+      });
+
+      // Verify spawn args include --resume
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.arrayContaining(['--resume', 'session-abc-123', 'follow up question']),
+        expect.any(Object)
+      );
+    });
+
+    it('should throw for claude_code_reply with missing threadId', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockReturnValue(true);
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      await expect(handler({
+        params: {
+          name: 'claude_code_reply',
+          arguments: {
+            prompt: 'no thread id provided',
+          }
+        }
+      })).rejects.toThrow('Missing or invalid required parameter: threadId');
+    });
+
+    it('should throw for claude_code_reply with missing prompt', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockReturnValue(true);
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      await expect(handler({
+        params: {
+          name: 'claude_code_reply',
+          arguments: {
+            threadId: 'some-thread-id',
+          }
+        }
+      })).rejects.toThrow('Missing or invalid required parameter: prompt');
+    });
+
+    it('should pass workFolder to claude_code_reply as CWD', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockReturnValue(true);
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      const mockProcess = new EventEmitter() as any;
+      mockProcess.stdout = new EventEmitter();
+      mockProcess.stderr = new EventEmitter();
+      mockProcess.stdout.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stdout['data'] = handler;
+      });
+      mockProcess.stderr.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stderr['data'] = handler;
+      });
+      mockSpawn.mockReturnValue(mockProcess);
+
+      const promise = handler({
+        params: {
+          name: 'claude_code_reply',
+          arguments: {
+            threadId: 'session-xyz',
+            prompt: 'continue',
+            workFolder: '/workspace/project',
+          }
+        }
+      });
+
+      const jsonOutput = JSON.stringify({
+        type: 'result', session_id: 'session-xyz', result: 'ok',
+        is_error: false, duration_ms: 100, total_cost_usd: 0.001,
+      });
+      setTimeout(() => {
+        mockProcess.stdout['data'](jsonOutput);
+        mockProcess.emit('close', 0);
+      }, 10);
+
+      await promise;
+
+      // Verify CWD was set to workFolder
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ cwd: '/workspace/project' })
+      );
+    });
+
+    it('should set isError when CLI returns is_error:true', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockReturnValue(true);
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      const mockProcess = new EventEmitter() as any;
+      mockProcess.stdout = new EventEmitter();
+      mockProcess.stderr = new EventEmitter();
+      mockProcess.stdout.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stdout['data'] = handler;
+      });
+      mockProcess.stderr.on = vi.fn((event: any, handler: any) => {
+        if (event === 'data') mockProcess.stderr['data'] = handler;
+      });
+      mockSpawn.mockReturnValue(mockProcess);
+
+      const promise = handler({
+        params: {
+          name: 'claude_code',
+          arguments: { prompt: 'test', workFolder: '/tmp' }
+        }
+      });
+
+      const jsonOutput = JSON.stringify({
+        type: 'result',
+        session_id: 'err-session',
+        result: 'Permission denied: cannot access file',
+        is_error: true,
+        duration_ms: 200,
+        total_cost_usd: 0.002,
+      });
+      setTimeout(() => {
+        mockProcess.stdout['data'](jsonOutput);
+        mockProcess.emit('close', 0);
+      }, 10);
+
+      const result = await promise;
+      expect(result.content[0].text).toBe('Permission denied: cannot access file');
+      expect(result.isError).toBe(true);
+    });
+
+    it('should throw error for non-existent workFolder', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockImplementation((path) => {
+        if (String(path).includes('.claude')) return true;
+        if (path === '/nonexistent') return false;
+        return false;
+      });
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      await expect(handler({
         params: {
           name: 'claude_code',
           arguments: {
@@ -542,18 +777,122 @@ describe('ClaudeCodeServer Unit Tests', () => {
             workFolder: '/nonexistent'
           }
         }
-      });
-      
-      // Simulate execution
-      setTimeout(() => {
-        mockProcess.emit('close', 0);
-      }, 10);
-      
-      await promise;
-      
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Warning] Specified workFolder does not exist: /nonexistent.')
-      );
+      })).rejects.toThrow('Specified workFolder does not exist: /nonexistent');
+    });
+  });
+});
+
+describe('parseClaudeOutput', () => {
+  it('should parse valid JSON output', async () => {
+    const module = await import('../server.js');
+    const { parseClaudeOutput } = module;
+
+    const input = JSON.stringify({
+      type: 'result',
+      session_id: 'abc-123',
+      result: 'hello world',
+      is_error: false,
+      duration_ms: 1000,
+      total_cost_usd: 0.01,
+    });
+
+    const output = parseClaudeOutput(input);
+    expect(output.resultText).toBe('hello world');
+    expect(output.sessionId).toBe('abc-123');
+    expect(output.isError).toBe(false);
+  });
+
+  it('should fall back to raw text on invalid JSON', async () => {
+    const module = await import('../server.js');
+    const { parseClaudeOutput } = module;
+
+    const output = parseClaudeOutput('plain text output');
+    expect(output.resultText).toBe('plain text output');
+    expect(output.sessionId).toBeUndefined();
+    expect(output.isError).toBeUndefined();
+  });
+
+  it('should fall back when JSON is missing result field', async () => {
+    const module = await import('../server.js');
+    const { parseClaudeOutput } = module;
+
+    const input = JSON.stringify({ status: 'ok', session_id: 'xyz' });
+    const output = parseClaudeOutput(input);
+    // Falls back to raw JSON string since result field is missing
+    expect(output.resultText).toBe(input);
+    expect(output.sessionId).toBeUndefined();
+  });
+
+  it('should handle is_error: true', async () => {
+    const module = await import('../server.js');
+    const { parseClaudeOutput } = module;
+
+    const input = JSON.stringify({
+      type: 'result',
+      session_id: 'err-session',
+      result: 'something went wrong',
+      is_error: true,
+      duration_ms: 100,
+      total_cost_usd: 0.001,
+    });
+
+    const output = parseClaudeOutput(input);
+    expect(output.resultText).toBe('something went wrong');
+    expect(output.sessionId).toBe('err-session');
+    expect(output.isError).toBe(true);
+  });
+
+  it('should handle non-string session_id gracefully', async () => {
+    const module = await import('../server.js');
+    const { parseClaudeOutput } = module;
+
+    const input = JSON.stringify({
+      type: 'result',
+      session_id: 12345,  // number instead of string
+      result: 'some output',
+      is_error: false,
+    });
+
+    const output = parseClaudeOutput(input);
+    expect(output.resultText).toBe('some output');
+    expect(output.sessionId).toBeUndefined();
+  });
+});
+
+describe('buildResponse', () => {
+  it('should build response with structuredContent when sessionId provided', async () => {
+    const module = await import('../server.js');
+    const { buildResponse } = module;
+
+    const response = buildResponse('hello', 'session-123') as any;
+    expect(response.content).toEqual([{ type: 'text', text: 'hello' }]);
+    expect(response.structuredContent).toEqual({
+      threadId: 'session-123',
+      content: 'hello',
+    });
+    expect(response.isError).toBe(false);
+  });
+
+  it('should build response without structuredContent when no sessionId', async () => {
+    const module = await import('../server.js');
+    const { buildResponse } = module;
+
+    const response = buildResponse('hello') as any;
+    expect(response.content).toEqual([{ type: 'text', text: 'hello' }]);
+    expect(response.structuredContent).toBeUndefined();
+    expect(response.isError).toBe(false);
+  });
+
+  it('should set isError when passed', async () => {
+    const module = await import('../server.js');
+    const { buildResponse } = module;
+
+    const response = buildResponse('error message', 'session-456', true) as any;
+    expect(response.content).toEqual([{ type: 'text', text: 'error message' }]);
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual({
+      threadId: 'session-456',
+      content: 'error message',
     });
   });
 });
