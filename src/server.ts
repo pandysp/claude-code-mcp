@@ -19,7 +19,7 @@ import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
 
 // Server version - update this when releasing new versions
-const SERVER_VERSION = "2.0.2";
+const SERVER_VERSION = "2.0.3";
 
 /**
  * Structured output from `claude -p --output-format json`
