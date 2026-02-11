@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      mcp-sdk:
+        patterns:
+          - "@modelcontextprotocol/*"
+    open-pull-requests-limit: 10

@@ -1,6 +1,6 @@
 @echo off
 REM Set environment variables if needed
-REM set CLAUDE_CLI_PATH=C:\custom\path\to\claude.exe
+REM set CLAUDE_CLI_NAME=C:\custom\path\to\claude.exe
 
 REM Get the directory of this script
 SET SCRIPT_DIR=%~dp0

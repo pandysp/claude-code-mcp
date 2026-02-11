@@ -4,44 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-This is the source code for the Claude Code MCP tool - a server that allows running Claude Code in one-shot mode with permissions bypassed automatically. When you're asked to edit the Claude Code tool description or behavior, update it in `src/server.ts`.
+This is `@pandysp/claude-code-mcp` -- an MCP server that runs Claude Code as a tool with session continuity. It provides two tools: `claude_code` (one-shot) and `claude_code_reply` (resume by thread ID).
 
 ## Key Files
 
-- `src/server.ts`: The main server implementation containing the Claude Code tool description and functionality
+- `src/server.ts`: Main server implementation (tool definitions, CLI invocation, JSON output parsing)
 - `package.json`: Package configuration and dependencies
 - `start.sh`/`start.bat`: Scripts to start the server
 
 ## Development Commands
 
 ```bash
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
-
-# Start the server
-npm run start
-
-# Development mode with auto-reloading
-npm run dev
+npm install          # Install dependencies
+npm run build        # Build (tsc)
+npm run start        # Start the server
+npm run dev          # Dev mode with tsx
+npm run test:unit    # Run unit tests
+npm run test:coverage # Coverage report
 ```
-
-## Tool Description
-
-The tool description can be found in `src/server.ts`. When asked to update the Claude Code tool description, look for the `description` field in the `setupToolHandlers` method.
 
 ## Architecture Notes
 
-- This MCP server provides a single tool (`claude_code`) that executes Claude CLI with bypassed permissions
-- The server handles execution via the `spawnAsync` function that runs Claude CLI with appropriate parameters
-- Error handling and timeout management are implemented for reliability
-- Working directory can be specified via the `workFolder` parameter
+- Two MCP tools: `claude_code` (one-shot) and `claude_code_reply` (session resume via `--resume`)
+- CLI invocation via `spawnAsync` with 30-minute timeout
+- JSON output parsing extracts `session_id`, `result`, and `is_error` from `--output-format json`
+- `structuredContent.threadId` in responses enables multi-agent session threading
+- `workFolder` validation rejects non-existent directories with `InvalidParams`
 
 ## Environment Variables
 
-- `CLAUDE_CLI_PATH`: Path to the Claude CLI executable
+- `CLAUDE_CLI_NAME`: Override CLI binary name or absolute path (default: `claude`)
 - `MCP_CLAUDE_DEBUG`: Set to `true` for verbose debug logging
 
 ## Best Practices
@@ -50,8 +42,4 @@ The tool description can be found in `src/server.ts`. When asked to update the C
 - Maintain compatibility with the Model Context Protocol spec
 - Keep error messages informative for troubleshooting
 - Document any changes to the API or configuration options
-- Pure updates to the readme and/or adding new images do not require a version bump.
-- **Comprehensive Staging for README Image Updates:** When updating `README.md` to include new images, ensure that prompts for `claude_code` explicitly instruct it to stage *both* the modified `README.md` file *and* all new image files (e.g., from the `assets/` directory). Committing the `README.md` without its new image assets is a common pitfall.
-- **Clarity in Multi-Step Git Prompts:** For complex, multi-step `claude_code` prompts involving Git operations (like creating branches, committing multiple files, and pushing/creating PRs):
-    - Clearly list all files to be staged in the commit (text files, new image assets, etc.).
-- **Automatic Push on PR Branches:** When the user asks to commit changes while on a pull request branch, Claude should automatically push the changes to the remote after committing. This ensures PR updates are immediately visible for review.
+- Use `./scripts/publish-release.sh` for releases (automatically syncs `SERVER_VERSION` in `src/server.ts` with `package.json`)

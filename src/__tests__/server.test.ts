@@ -760,6 +760,35 @@ describe('ClaudeCodeServer Unit Tests', () => {
       expect(result.isError).toBe(true);
     });
 
+    it('should throw error for empty string workFolder', async () => {
+      mockHomedir.mockReturnValue('/home/user');
+      mockExistsSync.mockReturnValue(true);
+
+      setupServerMock();
+
+      const module = await import('../server.js');
+      // @ts-ignore
+      const { ClaudeCodeServer } = module;
+      const server = new ClaudeCodeServer();
+      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+
+      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
+        (call: any[]) => call[0].name === 'callTool'
+      );
+
+      const handler = callToolCall[1];
+
+      await expect(handler({
+        params: {
+          name: 'claude_code',
+          arguments: {
+            prompt: 'test',
+            workFolder: ''
+          }
+        }
+      })).rejects.toThrow('workFolder cannot be an empty string');
+    });
+
     it('should throw error for non-existent workFolder', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockImplementation((path) => {

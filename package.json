@@ -1,13 +1,27 @@
 {
   "name": "@pandysp/claude-code-mcp",
-  "version": "1.11.0",
-  "description": "MCP server for Claude Code with session support (fork of @steipete/claude-code-mcp)",
-  "author": "Peter Steinberger",
+  "version": "2.0.0",
+  "description": "MCP server that runs Claude Code as a tool with session continuity",
+  "author": "Andreas Spannagel",
+  "contributors": [
+    {
+      "name": "Peter Steinberger",
+      "url": "https://github.com/steipete"
+    }
+  ],
   "license": "MIT",
   "main": "dist/server.js",
   "bin": {
     "claude-code-mcp": "dist/server.js"
   },
+  "files": [
+    "dist/",
+    "start.sh",
+    "start.bat",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
@@ -32,9 +46,12 @@
     "typescript": "^5.8.3",
     "vitest": "^2.1.8"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/steipete/claude-code-mcp.git"
+    "url": "git+https://github.com/pandysp/claude-code-mcp.git"
   },
   "keywords": [
     "mcp",
@@ -45,7 +62,7 @@
     "tools"
   ],
   "bugs": {
-    "url": "https://github.com/steipete/claude-code-mcp/issues"
+    "url": "https://github.com/pandysp/claude-code-mcp/issues"
   },
-  "homepage": "https://github.com/steipete/claude-code-mcp#readme"
+  "homepage": "https://github.com/pandysp/claude-code-mcp#readme"
 }

@@ -9,13 +9,17 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'node:child_process';
+
+type ExtendedServerResult = ServerResult & {
+  structuredContent?: { threadId: string; content: string };
+};
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
 
 // Server version - update this when releasing new versions
-const SERVER_VERSION = "1.11.0";
+const SERVER_VERSION = "2.0.0";
 
 /**
  * Structured output from `claude -p --output-format json`
@@ -131,13 +135,13 @@ export function parseClaudeOutput(stdout: string): { resultText: string; session
  * extension consumed by OpenClaw's multi-agent system to enable session
  * threading across tool calls. Other MCP clients will ignore it.
  */
-export function buildResponse(resultText: string, sessionId?: string, isError?: boolean): ServerResult {
-  const response: ServerResult = {
+export function buildResponse(resultText: string, sessionId?: string, isError?: boolean): ExtendedServerResult {
+  const response: ExtendedServerResult = {
     content: [{ type: 'text', text: resultText }],
     isError: isError ?? false,
   };
   if (sessionId) {
-    (response as any).structuredContent = { threadId: sessionId, content: resultText };
+    response.structuredContent = { threadId: sessionId, content: resultText };
   }
   return response;
 }
@@ -147,6 +151,9 @@ export function buildResponse(resultText: string, sessionId?: string, isError?: 
  * Throws InvalidParams if the specified directory does not exist.
  */
 function resolveWorkFolder(workFolder?: unknown): string {
+  if (typeof workFolder === 'string' && workFolder.trim() === '') {
+    throw new McpError(ErrorCode.InvalidParams, 'workFolder cannot be an empty string');
+  }
   if (workFolder && typeof workFolder === 'string') {
     const resolvedCwd = pathResolve(workFolder);
     debugLog(`[Debug] Specified workFolder: ${workFolder}, Resolved to: ${resolvedCwd}`);
@@ -176,6 +183,7 @@ export async function spawnAsync(command: string, args: string[], options?: { ti
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
 
     process.stdout.on('data', (data) => { stdout += data.toString(); });
     process.stderr.on('data', (data) => {
@@ -184,6 +192,8 @@ export async function spawnAsync(command: string, args: string[], options?: { ti
     });
 
     process.on('error', (error: NodeJS.ErrnoException) => {
+      if (settled) { debugLog('[Spawn] Ignoring error event after promise settled'); return; }
+      settled = true;
       debugLog(`[Spawn Error Event] Full error object:`, error);
       let errorMessage = `Spawn error: ${error.message}`;
       if (error.path) {
@@ -197,6 +207,8 @@ export async function spawnAsync(command: string, args: string[], options?: { ti
     });
 
     process.on('close', (code) => {
+      if (settled) { debugLog('[Spawn] Ignoring close event after promise settled'); return; }
+      settled = true;
       debugLog(`[Spawn Close] Exit code: ${code}`);
       debugLog(`[Spawn Stderr Full] ${stderr.trim()}`);
       debugLog(`[Spawn Stdout Full] ${stdout.trim()}`);
@@ -227,7 +239,7 @@ export class ClaudeCodeServer {
     this.server = new Server(
       {
         name: 'claude_code',
-        version: '1.0.0',
+        version: SERVER_VERSION,
       },
       {
         capabilities: {
@@ -385,6 +397,9 @@ export class ClaudeCodeServer {
           let errorMessage = error.message || 'Unknown error';
           if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;
           if (error.stdout) errorMessage += `\nStdout: ${error.stdout}`;
+          if (error.message?.includes('ENOENT')) {
+            errorMessage += '\nClaude CLI not found. Ensure it is installed and in your PATH, or set CLAUDE_CLI_NAME.';
+          }
           if (error.signal === 'SIGTERM' || error.message?.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
             throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
           }
@@ -431,6 +446,9 @@ export class ClaudeCodeServer {
         let errorMessage = error.message || 'Unknown error';
         if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;
         if (error.stdout) errorMessage += `\nStdout: ${error.stdout}`;
+        if (error.message?.includes('ENOENT')) {
+          errorMessage += '\nClaude CLI not found. Ensure it is installed and in your PATH, or set CLAUDE_CLI_NAME.';
+        }
 
         if (error.signal === 'SIGTERM' || error.message?.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
           throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);

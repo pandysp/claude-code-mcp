@@ -3,24 +3,30 @@
 ## Pre-Release Checks
 
 - [ ] Tests are green on GitHub CI
-- [ ] Run linter locally (`npm run lint`)
-- [ ] Run type checker locally (`npm run typecheck`)
-- [ ] Run tests locally (`npm test`)
 - [ ] Run build locally (`npm run build`)
+- [ ] Run tests locally (`npm run test:unit`)
 - [ ] Changelog version has been increased
 - [ ] Changelog entries for the new version are written
-- [ ] Version in `server.ts` (hardcoded) is updated
-- [ ] Version in `package.json` is updated
-
-## Local Verification
-
-- [ ] Install npm package locally (`npm pack && npm install -g <package-name>-<version>.tgz`)
-- [ ] Test the locally installed package using the npm inspector (automated tests)
 
 ## Release Steps
 
-- [ ] Push all changes to the main branch
-- [ ] Create a git tag for the version (e.g., `git tag v1.2.3`)
-- [ ] Push the git tag (e.g., `git push origin v1.2.3`)
-- [ ] Publish to npm (`npm publish`)
-- [ ] Create a GitHub Release based on the tag, including changelog notes 
+Use the release script which handles version bumping, SERVER_VERSION sync, tagging, and pushing:
+
+```bash
+./scripts/publish-release.sh
+```
+
+The script will:
+1. Bump `package.json` version (patch/minor/major)
+2. Sync `SERVER_VERSION` in `src/server.ts`
+3. Prompt you to update `CHANGELOG.md`
+4. Commit, tag, and push
+5. Create a GitHub Release
+
+CI automatically publishes to npm when it detects a `v*` tag.
+
+## Post-Release
+
+- [ ] Test the new version with: `npx @pandysp/claude-code-mcp@latest`
+- [ ] Update any documentation if needed
+- [ ] Announce the release if significant
