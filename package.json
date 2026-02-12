@@ -1,6 +1,6 @@
 {
   "name": "@pandysp/claude-code-mcp",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "description": "MCP server that runs Claude Code as a tool with session continuity",
   "author": "Andreas Spannagel",
   "contributors": [

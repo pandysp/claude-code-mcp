@@ -123,17 +123,15 @@ describe('Claude Code Edge Cases', () => {
       await errorClient.disconnect();
     });
 
-    it('should handle permission denied errors', async () => {
+    it('should reject non-existent restricted directory', async () => {
       const restrictedDir = '/root/restricted';
-      
-      // This test actually verifies that the server gracefully handles
-      // non-existent directories by falling back to the default directory
-      const response = await client.callTool('claude_code', {
-        prompt: 'Test prompt',
-        workFolder: restrictedDir,
-      });
-      
-      expect(response).toBeTruthy();
+
+      await expect(
+        client.callTool('claude_code', {
+          prompt: 'Test prompt',
+          workFolder: restrictedDir,
+        })
+      ).rejects.toThrow(/workFolder does not exist/);
     });
   });
 
@@ -167,16 +165,15 @@ describe('Claude Code Edge Cases', () => {
   });
 
   describe('Path Traversal', () => {
-    it('should prevent path traversal attacks', async () => {
+    it('should reject path traversal workFolder', async () => {
       const maliciousPath = join(testDir, '..', '..', 'etc', 'passwd');
-      
-      // Server resolves paths safely
-      const response = await client.callTool('claude_code', {
-        prompt: 'Read file',
-        workFolder: maliciousPath,
-      });
-      
-      expect(response).toBeTruthy();
+
+      await expect(
+        client.callTool('claude_code', {
+          prompt: 'Read file',
+          workFolder: maliciousPath,
+        })
+      ).rejects.toThrow(/workFolder does not exist/);
     });
   });
 });

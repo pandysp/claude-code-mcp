@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { EventEmitter } from 'node:events';
-import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 
 // Mock dependencies
@@ -94,16 +93,16 @@ describe('Error Handling Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
-      const server = new ClaudeCodeServer();
+
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
+
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
       );
-      
+
       const handler = callToolCall[1];
-      
+
       await expect(
         handler({
           params: {
@@ -123,8 +122,8 @@ describe('Error Handling Tests', () => {
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       const { McpError } = await import('@modelcontextprotocol/sdk/types.js');
-      
-      const server = new ClaudeCodeServer();
+
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       // Find the callTool handler
@@ -180,8 +179,8 @@ describe('Error Handling Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
-      const server = new ClaudeCodeServer();
+
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -204,12 +203,12 @@ describe('Error Handling Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
       setupServerMock();
-      
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
-      const server = new ClaudeCodeServer();
+
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -356,9 +355,9 @@ describe('Error Handling Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
-      const server = new ClaudeCodeServer();
-      
+
+      new ClaudeCodeServer();
+
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Claude CLI not found')
       );

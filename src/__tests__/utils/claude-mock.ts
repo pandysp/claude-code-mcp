@@ -23,42 +23,42 @@ export class ClaudeMock {
       mkdirSync(dir, { recursive: true });
     }
 
-    // Create a simple bash script that echoes responses
+    // Create a simple bash script that echoes responses.
+    // The real Claude CLI uses -p as a flag (not an option taking a value).
+    // The prompt is the last positional argument:
+    //   claude --dangerously-skip-permissions -p --output-format json "the prompt"
     const mockScript = `#!/bin/bash
 # Mock Claude CLI for testing
 
-# Extract the prompt from arguments
+# The prompt is the last positional argument (after all flags/options).
+# Collect positional args; the last one is the prompt.
 prompt=""
-verbose=false
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -p|--prompt)
-      prompt="$2"
+    -p|--prompt|--dangerously-skip-permissions|--yes|-y)
+      shift
+      ;;
+    --output-format|--resume)
       shift 2
       ;;
     --verbose)
-      verbose=true
-      shift
-      ;;
-    --yes|-y|--dangerously-skip-permissions)
       shift
       ;;
     *)
+      prompt="$1"
       shift
       ;;
   esac
 done
 
 # Mock responses based on prompt
-if [[ "$prompt" == *"create"* ]]; then
-  echo "Created file successfully"
-elif [[ "$prompt" == *"Create"* ]]; then
-  echo "Created file successfully"  
-elif [[ "$prompt" == *"git"* ]] && [[ "$prompt" == *"commit"* ]]; then
-  echo "Committed changes successfully"
-elif [[ "$prompt" == *"error"* ]]; then
+if [[ "$prompt" == *"error"* ]]; then
   echo "Error: Mock error response" >&2
   exit 1
+elif [[ "$prompt" == *"create"* ]] || [[ "$prompt" == *"Create"* ]]; then
+  echo "Created file successfully"
+elif [[ "$prompt" == *"git"* ]] && [[ "$prompt" == *"commit"* ]]; then
+  echo "Committed changes successfully"
 else
   echo "Command executed successfully"
 fi

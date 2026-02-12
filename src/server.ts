@@ -19,17 +19,22 @@ import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
 
 // Server version - update this when releasing new versions
-const SERVER_VERSION = "2.0.3";
+const SERVER_VERSION = "2.1.0";
 
 /**
- * Structured output from `claude -p --output-format json`
+ * Structured output from `claude -p --output-format json`.
+ * Only fields actually read by this server are included.
  */
 interface ClaudeJsonOutput {
   type: string;
-  session_id: string;
+  subtype: string;
   result: string;
   is_error: boolean;
+  session_id: string;
   duration_ms: number;
+  duration_api_ms: number;
+  num_turns: number;
+  stop_reason: string | null;
   total_cost_usd: number;
 }
 
@@ -103,7 +108,7 @@ export function findClaudeCli(): string {
  */
 export function parseClaudeOutput(stdout: string): { resultText: string; sessionId?: string; isError?: boolean } {
   try {
-    const parsed = JSON.parse(stdout);
+    const parsed: Partial<ClaudeJsonOutput> = JSON.parse(stdout);
     if (typeof parsed.result !== 'string') {
       console.error(
         `[Warning] Claude CLI JSON output missing 'result' field. ` +
@@ -174,24 +179,25 @@ function resolveWorkFolder(workFolder?: unknown): string {
 export async function spawnAsync(command: string, args: string[], options?: { timeout?: number, cwd?: string }): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     debugLog(`[Spawn] Running command: ${command} ${args.join(' ')}`);
-    const process = spawn(command, args, {
+    const childProcess = spawn(command, args, {
       shell: false, // Reverted to false
       timeout: options?.timeout,
       cwd: options?.cwd,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CLAUDE_CODE_ENABLE_TASKS: 'true' },
     });
 
     let stdout = '';
     let stderr = '';
     let settled = false;
 
-    process.stdout.on('data', (data) => { stdout += data.toString(); });
-    process.stderr.on('data', (data) => {
+    childProcess.stdout.on('data', (data) => { stdout += data.toString(); });
+    childProcess.stderr.on('data', (data) => {
       stderr += data.toString();
       debugLog(`[Spawn Stderr Chunk] ${data.toString()}`);
     });
 
-    process.on('error', (error: NodeJS.ErrnoException) => {
+    childProcess.on('error', (error: NodeJS.ErrnoException) => {
       if (settled) { debugLog('[Spawn] Ignoring error event after promise settled'); return; }
       settled = true;
       debugLog(`[Spawn Error Event] Full error object:`, error);
@@ -206,7 +212,7 @@ export async function spawnAsync(command: string, args: string[], options?: { ti
       reject(new Error(errorMessage));
     });
 
-    process.on('close', (code) => {
+    childProcess.on('close', (code) => {
       if (settled) { debugLog('[Spawn] Ignoring close event after promise settled'); return; }
       settled = true;
       debugLog(`[Spawn Close] Exit code: ${code}`);
@@ -228,13 +234,11 @@ export async function spawnAsync(command: string, args: string[], options?: { ti
 export class ClaudeCodeServer {
   private server: Server;
   private claudeCliPath: string; // This now holds either a full path or just 'claude'
-  private packageVersion: string; // Add packageVersion property
 
   constructor() {
     // Use the simplified findClaudeCli function
     this.claudeCliPath = findClaudeCli(); // Removed debugMode argument
     console.error(`[Setup] Using Claude CLI command/path: ${this.claudeCliPath}`);
-    this.packageVersion = SERVER_VERSION;
 
     this.server = new Server(
       {
@@ -343,7 +347,7 @@ export class ClaudeCodeServer {
     // Handle tool calls
     const executionTimeoutMs = 1800000; // 30 minutes timeout
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (args, call): Promise<ServerResult> => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (args, _call): Promise<ServerResult> => {
       debugLog('[Debug] Handling CallToolRequest:', args);
 
       const toolName = args.params.name;

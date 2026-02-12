@@ -42,8 +42,8 @@ describe('Claude Code MCP E2E Tests', () => {
   describe('Tool Registration', () => {
     it('should register claude_code tool', async () => {
       const tools = await client.listTools();
-      
-      expect(tools).toHaveLength(1);
+
+      expect(tools).toHaveLength(2);
       expect(tools[0]).toEqual({
         name: 'claude_code',
         description: expect.stringContaining('Claude Code Agent'),
@@ -61,6 +61,14 @@ describe('Claude Code MCP E2E Tests', () => {
           },
           required: ['prompt'],
         },
+      });
+      expect(tools[1]).toEqual({
+        name: 'claude_code_reply',
+        description: expect.stringContaining('Continue a Claude Code conversation'),
+        inputSchema: expect.objectContaining({
+          type: 'object',
+          required: ['threadId', 'prompt'],
+        }),
       });
     });
   });
@@ -107,15 +115,15 @@ describe('Claude Code MCP E2E Tests', () => {
       expect(response).toBeTruthy();
     });
 
-    it('should use default directory for non-existent working directory', async () => {
+    it('should reject non-existent working directory', async () => {
       const nonExistentDir = join(testDir, 'non-existent');
-      
-      const response = await client.callTool('claude_code', {
-        prompt: 'Test prompt',
-        workFolder: nonExistentDir,
-      });
-      
-      expect(response).toBeTruthy();
+
+      await expect(
+        client.callTool('claude_code', {
+          prompt: 'Test prompt',
+          workFolder: nonExistentDir,
+        })
+      ).rejects.toThrow(/workFolder does not exist/);
     });
   });
 
@@ -164,7 +172,7 @@ describe('Integration Tests (Local Only)', () => {
   it.skip('should create a file with real Claude CLI', async () => {
     await client.connect();
     
-    const response = await client.callTool('claude_code', {
+    await client.callTool('claude_code', {
       prompt: 'Create a file called hello.txt with content "Hello from Claude"',
       workFolder: testDir,
     });
@@ -178,7 +186,7 @@ describe('Integration Tests (Local Only)', () => {
     await client.connect();
     
     // Initialize git repo
-    const response = await client.callTool('claude_code', {
+    await client.callTool('claude_code', {
       prompt: 'Initialize a git repository and create a README.md file',
       workFolder: testDir,
     });

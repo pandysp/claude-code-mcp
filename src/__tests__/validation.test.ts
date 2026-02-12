@@ -30,7 +30,6 @@ const mockExistsSync = vi.mocked(existsSync);
 const mockHomedir = vi.mocked(homedir);
 
 describe('Argument Validation Tests', () => {
-  let consoleErrorSpy: any;
   let errorHandler: any = null;
 
   function setupServerMock() {
@@ -55,7 +54,7 @@ describe('Argument Validation Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   describe('Tool Arguments Schema', () => {
@@ -67,7 +66,7 @@ describe('Argument Validation Tests', () => {
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
-      const server = new ClaudeCodeServer();
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       // Find tool definition  
@@ -76,9 +75,7 @@ describe('Argument Validation Tests', () => {
       );
       
       const listHandler = listToolsCall[1];
-      const tools = await listHandler();
-      const claudeCodeTool = tools.tools[0];
-      
+      await listHandler();
       // Extract schema from tool definition
       const schema = z.object({
         prompt: z.string(),
@@ -98,7 +95,7 @@ describe('Argument Validation Tests', () => {
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
-      const server = new ClaudeCodeServer();
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       // Find tool definition  
@@ -107,9 +104,7 @@ describe('Argument Validation Tests', () => {
       );
       
       const listHandler = listToolsCall[1];
-      const tools = await listHandler();
-      const claudeCodeTool = tools.tools[0];
-      
+      await listHandler();
       // Extract schema from tool definition
       const schema = z.object({
         prompt: z.string(),
@@ -172,7 +167,7 @@ describe('Argument Validation Tests', () => {
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
-      const server = new ClaudeCodeServer();
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -203,7 +198,7 @@ describe('Argument Validation Tests', () => {
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
-      const server = new ClaudeCodeServer();
+      new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -224,7 +219,7 @@ describe('Argument Validation Tests', () => {
       const spawn = (await import('node:child_process')).spawn;
       vi.mocked(spawn).mockReturnValue(mockProcess);
       
-      const result = await handler({
+      await handler({
         params: {
           name: 'claude_code',
           arguments: {
@@ -232,7 +227,7 @@ describe('Argument Validation Tests', () => {
           }
         }
       });
-      
+
       // Should execute with empty prompt
       expect(spawn).toHaveBeenCalled();
     });
