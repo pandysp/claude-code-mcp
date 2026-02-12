@@ -34,7 +34,7 @@ describe('Argument Validation Tests', () => {
 
   function setupServerMock() {
     errorHandler = null;
-    vi.mocked(Server).mockImplementation(() => {
+    vi.mocked(Server).mockImplementation(function() {
       const instance = {
         setRequestHandler: vi.fn(),
         connect: vi.fn(),
@@ -122,12 +122,13 @@ describe('Argument Validation Tests', () => {
         prompt: z.string(),
         workFolder: z.string().optional()
       });
-      
+
       try {
         schema.parse({});
       } catch (error: any) {
-        expect(error.errors[0].path).toEqual(['prompt']);
-        expect(error.errors[0].message).toContain('Required');
+        expect(error.issues[0].path).toEqual(['prompt']);
+        // Zod 4 changed error message format from "Required" to "Invalid input: expected string, received undefined"
+        expect(error.issues[0].message).toMatch(/Invalid input.*expected string.*received undefined/);
       }
     });
 

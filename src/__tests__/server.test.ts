@@ -309,12 +309,14 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockExistsSync.mockReturnValue(true);
       
       // Set up Server mock before resetting modules
-      vi.mocked(Server).mockImplementation(() => ({
-        setRequestHandler: vi.fn(),
-        connect: vi.fn(),
-        close: vi.fn(),
-        onerror: undefined,
-      }) as any);
+      vi.mocked(Server).mockImplementation(function() {
+        return {
+          setRequestHandler: vi.fn(),
+          connect: vi.fn(),
+          close: vi.fn(),
+          onerror: undefined,
+        } as any;
+      });
       
       const module = await import('../server.js');
       // @ts-ignore
@@ -333,12 +335,14 @@ describe('ClaudeCodeServer Unit Tests', () => {
       
       const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
       const mockSetRequestHandler = vi.fn();
-      vi.mocked(Server).mockImplementation(() => ({
-        setRequestHandler: mockSetRequestHandler,
-        connect: vi.fn(),
-        close: vi.fn(),
-        onerror: undefined,
-      }) as any);
+      vi.mocked(Server).mockImplementation(function() {
+        return {
+          setRequestHandler: mockSetRequestHandler,
+          connect: vi.fn(),
+          close: vi.fn(),
+          onerror: undefined,
+        } as any;
+      });
       
       const module = await import('../server.js');
       // @ts-ignore
@@ -355,7 +359,7 @@ describe('ClaudeCodeServer Unit Tests', () => {
       
       const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
       let errorHandler: any = null;
-      vi.mocked(Server).mockImplementation(() => {
+      vi.mocked(Server).mockImplementation(function() {
         const instance = {
           setRequestHandler: vi.fn(),
           connect: vi.fn(),
@@ -387,12 +391,14 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockExistsSync.mockReturnValue(true);
       
       // Set up Server mock first
-      vi.mocked(Server).mockImplementation(() => ({
-        setRequestHandler: vi.fn(),
-        connect: vi.fn(),
-        close: vi.fn(),
-        onerror: undefined,
-      }) as any);
+      vi.mocked(Server).mockImplementation(function() {
+        return {
+          setRequestHandler: vi.fn(),
+          connect: vi.fn(),
+          close: vi.fn(),
+          onerror: undefined,
+        } as any;
+      });
       
       const module = await import('../server.js');
       // @ts-ignore
@@ -418,7 +424,7 @@ describe('ClaudeCodeServer Unit Tests', () => {
     let errorHandler: any = null;
     function setupServerMock() {
       errorHandler = null;
-      vi.mocked(Server).mockImplementation(() => {
+      vi.mocked(Server).mockImplementation(function() {
         const instance = {
           setRequestHandler: vi.fn(),
           connect: vi.fn(),
