@@ -19,7 +19,7 @@ import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
 
 // Server version - update this when releasing new versions
-const SERVER_VERSION = "2.1.0";
+const SERVER_VERSION = "2.2.0";
 
 /**
  * Structured output from `claude -p --output-format json`.
@@ -347,7 +347,7 @@ export class ClaudeCodeServer {
     // Handle tool calls
     const executionTimeoutMs = 1800000; // 30 minutes timeout
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (args, _call): Promise<ServerResult> => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (args, extra): Promise<ServerResult> => {
       debugLog('[Debug] Handling CallToolRequest:', args);
 
       const toolName = args.params.name;
@@ -363,6 +363,26 @@ export class ClaudeCodeServer {
         console.error(versionInfo);
         isFirstToolUse = false;
       }
+
+      // Set up progress heartbeats so the MCP client resets its timeout
+      // while the CLI is still running (prevents premature 60s timeout).
+      const progressToken = extra?._meta?.progressToken;
+      let progressInterval: NodeJS.Timeout | undefined;
+      let progressCount = 0;
+
+      if (progressToken !== undefined) {
+        progressInterval = setInterval(async () => {
+          progressCount++;
+          try {
+            await extra.sendNotification({
+              method: "notifications/progress" as const,
+              params: { progressToken, progress: progressCount },
+            });
+          } catch { /* ignore notification failures */ }
+        }, 15000);
+      }
+
+      try {
 
       // --- claude_code_reply ---
       if (toolName === 'claude_code_reply') {
@@ -458,6 +478,10 @@ export class ClaudeCodeServer {
           throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
         }
         throw new McpError(ErrorCode.InternalError, `Claude CLI execution failed: ${errorMessage}`);
+      }
+
+      } finally {
+        if (progressInterval) clearInterval(progressInterval);
       }
     });
   }
