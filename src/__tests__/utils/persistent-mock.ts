@@ -1,6 +1,7 @@
 import { ClaudeMock } from './claude-mock.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { getTestMockBaseDir } from './test-helpers.js';
 
 let sharedMock: ClaudeMock | null = null;
 
@@ -10,8 +11,7 @@ export async function getSharedMock(): Promise<ClaudeMock> {
   }
 
   // Always ensure mock exists and is executable
-  const testMockDir = process.env.HOME || process.env.USERPROFILE || '/home/node';
-  const mockPath = join(testMockDir, '.claude-code-test-mock', 'claudeMocked');
+  const mockPath = join(getTestMockBaseDir(), '.claude-code-test-mock', 'claudeMocked');
   if (!existsSync(mockPath)) {
     console.error(`[DEBUG] Mock not found at ${mockPath}, creating it...`);
     await sharedMock.setup();

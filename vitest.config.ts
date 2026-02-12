@@ -4,6 +4,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    include: ['src/**/*.test.ts'],
+    setupFiles: ['./src/__tests__/setup.ts'],
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

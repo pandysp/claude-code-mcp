@@ -6,7 +6,14 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 30000, // Longer timeout for e2e tests
     hookTimeout: 20000,
+    include: ['src/__tests__/e2e.test.ts', 'src/__tests__/edge-cases.test.ts'],
     setupFiles: ['./src/__tests__/setup.ts'],
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -19,7 +26,6 @@ export default defineConfig({
         'src/__tests__/utils/**',
       ],
     },
-    include: ['src/__tests__/e2e.test.ts', 'src/__tests__/edge-cases.test.ts'],
     mockReset: true,
     clearMocks: true,
     restoreMocks: true,
