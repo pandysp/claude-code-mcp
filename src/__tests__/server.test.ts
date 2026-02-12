@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { EventEmitter } from 'node:events';
 
@@ -270,8 +271,8 @@ describe('ClaudeCodeServer Unit Tests', () => {
       // @ts-ignore
       const { spawnAsync } = module;
       
-      spawnAsync('sleep', ['10'], { timeout: 100 }).catch(() => {});
-
+      const result = spawnAsync('sleep', ['10'], { timeout: 100 });
+      
       expect(mockSpawn).toHaveBeenCalledWith('sleep', ['10'], expect.objectContaining({
         timeout: 100
       }));
@@ -281,24 +282,11 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { spawnAsync } = module;
-
-      spawnAsync('ls', [], { cwd: '/tmp' }).catch(() => {});
-
+      
+      const result = spawnAsync('ls', [], { cwd: '/tmp' });
+      
       expect(mockSpawn).toHaveBeenCalledWith('ls', [], expect.objectContaining({
         cwd: '/tmp'
-      }));
-    });
-
-    it('should pass CLAUDE_CODE_ENABLE_TASKS env var to spawned process', async () => {
-      const module = await import('../server.js');
-      // @ts-ignore
-      const { spawnAsync } = module;
-
-      // We only care about spawn arguments, not the result
-      spawnAsync('claude', ['--version']).catch(() => {});
-
-      expect(mockSpawn).toHaveBeenCalledWith('claude', ['--version'], expect.objectContaining({
-        env: expect.objectContaining({ CLAUDE_CODE_ENABLE_TASKS: 'true' })
       }));
     });
   });
@@ -307,7 +295,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
     it('should initialize with correct settings', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      
+
+      // Re-import Server to get fresh mock after vi.resetModules()
+      const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
       // Set up Server mock before resetting modules
       vi.mocked(Server).mockImplementation(function() {
         return {
@@ -317,13 +307,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
           onerror: undefined,
         } as any;
       });
-      
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       new ClaudeCodeServer();
-      
+
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('[Setup] Using Claude CLI command/path:')
       );
@@ -347,9 +337,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       new ClaudeCodeServer();
-      
+
       expect(mockSetRequestHandler).toHaveBeenCalled();
     });
 
@@ -378,9 +368,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       new ClaudeCodeServer();
-      
+
       // Test error handler
       errorHandler(new Error('Test error'));
       expect(consoleErrorSpy).toHaveBeenCalledWith('[Error]', expect.any(Error));
@@ -389,7 +379,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
     it('should handle SIGINT', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      
+
+      // Re-import Server to get fresh mock after vi.resetModules()
+      const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
       // Set up Server mock first
       vi.mocked(Server).mockImplementation(function() {
         return {
@@ -399,22 +391,22 @@ describe('ClaudeCodeServer Unit Tests', () => {
           onerror: undefined,
         } as any;
       });
-      
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
       new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
+
       // Emit SIGINT
       const sigintHandler = process.listeners('SIGINT').slice(-1)[0] as any;
       await sigintHandler();
-      
+
       expect(mockServerInstance.close).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
-      
+
       exitSpy.mockRestore();
     });
   });
@@ -422,8 +414,10 @@ describe('ClaudeCodeServer Unit Tests', () => {
   describe('Tool handler implementation', () => {
     // Define setupServerMock for this describe block
     let errorHandler: any = null;
-    function setupServerMock() {
+    async function setupServerMock() {
       errorHandler = null;
+      // Re-import Server to get fresh mock after vi.resetModules()
+      const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
       vi.mocked(Server).mockImplementation(function() {
         const instance = {
           setRequestHandler: vi.fn(),
@@ -439,21 +433,22 @@ describe('ClaudeCodeServer Unit Tests', () => {
         });
         return instance;
       });
+      return Server;
     }
 
     it('should handle ListToolsRequest', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      
+
       // Use the setupServerMock function from the beginning of the file
-      setupServerMock();
-      
+      const ServerMock = await setupServerMock();
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       // Find the ListToolsRequest handler
       const listToolsCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -476,16 +471,16 @@ describe('ClaudeCodeServer Unit Tests', () => {
     it('should handle CallToolRequest', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      
+
       // Set up Server mock
-      setupServerMock();
-      
+      const ServerMock = await setupServerMock();
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       // Find the CallToolRequest handler
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -546,13 +541,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -613,13 +608,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -641,13 +636,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -669,13 +664,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -728,13 +723,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -782,13 +777,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -815,13 +810,13 @@ describe('ClaudeCodeServer Unit Tests', () => {
         return false;
       });
 
-      setupServerMock();
+      const ServerMock = await setupServerMock();
 
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
 
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'

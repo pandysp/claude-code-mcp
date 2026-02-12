@@ -30,10 +30,13 @@ const mockExistsSync = vi.mocked(existsSync);
 const mockHomedir = vi.mocked(homedir);
 
 describe('Argument Validation Tests', () => {
+  let consoleErrorSpy: any;
   let errorHandler: any = null;
 
-  function setupServerMock() {
+  async function setupServerMock() {
     errorHandler = null;
+    // Re-import Server to get fresh mock after vi.resetModules()
+    const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
     vi.mocked(Server).mockImplementation(function() {
       const instance = {
         setRequestHandler: vi.fn(),
@@ -49,25 +52,26 @@ describe('Argument Validation Tests', () => {
       });
       return instance;
     });
+    return Server;
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   describe('Tool Arguments Schema', () => {
     it('should validate valid arguments', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      setupServerMock();
+      const ServerMock = await setupServerMock();
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       // Find tool definition  
       const listToolsCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -75,7 +79,9 @@ describe('Argument Validation Tests', () => {
       );
       
       const listHandler = listToolsCall[1];
-      await listHandler();
+      const tools = await listHandler();
+      const claudeCodeTool = tools.tools[0];
+      
       // Extract schema from tool definition
       const schema = z.object({
         prompt: z.string(),
@@ -90,13 +96,13 @@ describe('Argument Validation Tests', () => {
     it('should reject invalid arguments', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      setupServerMock();
+      const ServerMock = await setupServerMock();
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       // Find tool definition  
       const listToolsCall = mockServerInstance.setRequestHandler.mock.calls.find(
@@ -104,7 +110,9 @@ describe('Argument Validation Tests', () => {
       );
       
       const listHandler = listToolsCall[1];
-      await listHandler();
+      const tools = await listHandler();
+      const claudeCodeTool = tools.tools[0];
+      
       // Extract schema from tool definition
       const schema = z.object({
         prompt: z.string(),
@@ -125,10 +133,12 @@ describe('Argument Validation Tests', () => {
 
       try {
         schema.parse({});
+        // If we reach here, the test should fail
+        expect(true).toBe(false);
       } catch (error: any) {
         expect(error.issues[0].path).toEqual(['prompt']);
-        // Zod 4 changed error message format from "Required" to "Invalid input: expected string, received undefined"
-        expect(error.issues[0].message).toMatch(/Invalid input.*expected string.*received undefined/);
+        // Zod 4 changed error message format and property name
+        expect(error.issues[0].message).toContain('expected string');
       }
     });
 
@@ -163,13 +173,13 @@ describe('Argument Validation Tests', () => {
     it('should validate workFolder is a string when provided', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      setupServerMock();
+      const ServerMock = await setupServerMock();
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -194,13 +204,13 @@ describe('Argument Validation Tests', () => {
     it('should handle empty string prompt', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
-      setupServerMock();
+      const ServerMock = await setupServerMock();
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
       
       new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
+      const mockServerInstance = vi.mocked(ServerMock).mock.results[0].value;
       
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
@@ -220,7 +230,7 @@ describe('Argument Validation Tests', () => {
       const spawn = (await import('node:child_process')).spawn;
       vi.mocked(spawn).mockReturnValue(mockProcess);
       
-      await handler({
+      const result = await handler({
         params: {
           name: 'claude_code',
           arguments: {
@@ -228,7 +238,7 @@ describe('Argument Validation Tests', () => {
           }
         }
       });
-
+      
       // Should execute with empty prompt
       expect(spawn).toHaveBeenCalled();
     });

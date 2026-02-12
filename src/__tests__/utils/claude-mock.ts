@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 /**
@@ -10,8 +10,9 @@ export class ClaudeMock {
   private responses = new Map<string, string>();
 
   constructor(binaryName: string = 'claude') {
-    // Always use /tmp directory for mocks in tests
-    this.mockPath = join('/tmp', 'claude-code-test-mock', binaryName);
+    // Use home directory instead of /tmp to avoid noexec issues
+    const testMockDir = process.env.HOME || process.env.USERPROFILE || '/home/node';
+    this.mockPath = join(testMockDir, '.claude-code-test-mock', binaryName);
   }
 
   /**
@@ -65,9 +66,8 @@ fi
 `;
 
     writeFileSync(this.mockPath, mockScript);
-    // Make executable
-    const { chmod } = await import('node:fs/promises');
-    await chmod(this.mockPath, 0o755);
+    // Make executable - use sync to avoid race condition
+    chmodSync(this.mockPath, 0o755);
   }
 
   /**
