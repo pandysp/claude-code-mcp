@@ -187,8 +187,8 @@ describe('Integration Tests (Local Only)', () => {
   // These tests will only run locally when Claude is available
   it.skip('should create a file with real Claude CLI', async () => {
     await client.connect();
-    
-    const response = await client.callTool('claude_code', {
+
+    await client.callTool('claude_code', {
       prompt: 'Create a file called hello.txt with content "Hello from Claude"',
       workFolder: testDir,
     });
@@ -200,9 +200,9 @@ describe('Integration Tests (Local Only)', () => {
 
   it.skip('should handle git operations with real Claude CLI', async () => {
     await client.connect();
-    
+
     // Initialize git repo
-    const response = await client.callTool('claude_code', {
+    await client.callTool('claude_code', {
       prompt: 'Initialize a git repository and create a README.md file',
       workFolder: testDir,
     });

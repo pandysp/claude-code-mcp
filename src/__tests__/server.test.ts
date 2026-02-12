@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { EventEmitter } from 'node:events';
 
 // Mock dependencies
@@ -270,9 +268,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { spawnAsync } = module;
-      
-      const result = spawnAsync('sleep', ['10'], { timeout: 100 });
-      
+
+      spawnAsync('sleep', ['10'], { timeout: 100 }).catch(() => {});
+
       expect(mockSpawn).toHaveBeenCalledWith('sleep', ['10'], expect.objectContaining({
         timeout: 100
       }));
@@ -282,9 +280,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { spawnAsync } = module;
-      
-      const result = spawnAsync('ls', [], { cwd: '/tmp' });
-      
+
+      spawnAsync('ls', [], { cwd: '/tmp' }).catch(() => {});
+
       expect(mockSpawn).toHaveBeenCalledWith('ls', [], expect.objectContaining({
         cwd: '/tmp'
       }));
