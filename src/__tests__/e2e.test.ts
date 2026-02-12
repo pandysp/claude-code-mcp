@@ -4,25 +4,27 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { MCPTestClient } from './utils/mcp-client.js';
 import { getSharedMock, cleanupSharedMock } from './utils/persistent-mock.js';
+import { getTestMockBaseDir } from './utils/test-helpers.js';
 
 describe('Claude Code MCP E2E Tests', () => {
   let client: MCPTestClient;
   let testDir: string;
   const serverPath = 'dist/server.js';
+  const mockBinaryPath = join(getTestMockBaseDir(), '.claude-code-test-mock', 'claudeMocked');
 
   beforeEach(async () => {
     // Ensure mock exists
     await getSharedMock();
-    
+
     // Create a temporary directory for test files
     testDir = mkdtempSync(join(tmpdir(), 'claude-code-test-'));
-    
+
     // Initialize MCP client with debug mode and custom binary name using absolute path
     client = new MCPTestClient(serverPath, {
       MCP_CLAUDE_DEBUG: 'true',
-      CLAUDE_CLI_NAME: '/tmp/claude-code-test-mock/claudeMocked',
+      CLAUDE_CLI_NAME: mockBinaryPath,
     });
-    
+
     await client.connect();
   });
 
@@ -40,7 +42,7 @@ describe('Claude Code MCP E2E Tests', () => {
   });
 
   describe('Tool Registration', () => {
-    it('should register claude_code tool', async () => {
+    it('should register claude_code and claude_code_reply tools', async () => {
       const tools = await client.listTools();
 
       expect(tools).toHaveLength(2);
@@ -65,10 +67,24 @@ describe('Claude Code MCP E2E Tests', () => {
       expect(tools[1]).toEqual({
         name: 'claude_code_reply',
         description: expect.stringContaining('Continue a Claude Code conversation'),
-        inputSchema: expect.objectContaining({
+        inputSchema: {
           type: 'object',
+          properties: {
+            threadId: {
+              type: 'string',
+              description: expect.stringContaining('thread/session ID'),
+            },
+            prompt: {
+              type: 'string',
+              description: expect.stringContaining('follow-up prompt'),
+            },
+            workFolder: {
+              type: 'string',
+              description: expect.stringContaining('working directory'),
+            },
+          },
           required: ['threadId', 'prompt'],
-        }),
+        },
       });
     });
   });
@@ -123,7 +139,7 @@ describe('Claude Code MCP E2E Tests', () => {
           prompt: 'Test prompt',
           workFolder: nonExistentDir,
         })
-      ).rejects.toThrow(/workFolder does not exist/);
+      ).rejects.toThrow(/Specified workFolder does not exist/);
     });
   });
 
@@ -171,7 +187,7 @@ describe('Integration Tests (Local Only)', () => {
   // These tests will only run locally when Claude is available
   it.skip('should create a file with real Claude CLI', async () => {
     await client.connect();
-    
+
     await client.callTool('claude_code', {
       prompt: 'Create a file called hello.txt with content "Hello from Claude"',
       workFolder: testDir,
@@ -184,7 +200,7 @@ describe('Integration Tests (Local Only)', () => {
 
   it.skip('should handle git operations with real Claude CLI', async () => {
     await client.connect();
-    
+
     // Initialize git repo
     await client.callTool('claude_code', {
       prompt: 'Initialize a git repository and create a README.md file',

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { getTestMockBaseDir } from './test-helpers.js';
 
 /**
  * Mock Claude CLI for testing
@@ -10,8 +11,7 @@ export class ClaudeMock {
   private responses = new Map<string, string>();
 
   constructor(binaryName: string = 'claude') {
-    // Always use /tmp directory for mocks in tests
-    this.mockPath = join('/tmp', 'claude-code-test-mock', binaryName);
+    this.mockPath = join(getTestMockBaseDir(), '.claude-code-test-mock', binaryName);
   }
 
   /**
@@ -23,51 +23,85 @@ export class ClaudeMock {
       mkdirSync(dir, { recursive: true });
     }
 
-    // Create a simple bash script that echoes responses.
-    // The real Claude CLI uses -p as a flag (not an option taking a value).
-    // The prompt is the last positional argument:
-    //   claude --dangerously-skip-permissions -p --output-format json "the prompt"
+    // Create a simple bash script that echoes responses
     const mockScript = `#!/bin/bash
 # Mock Claude CLI for testing
 
-# The prompt is the last positional argument (after all flags/options).
-# Collect positional args; the last one is the prompt.
+# Extract the prompt and format from arguments
 prompt=""
+output_format=""
+verbose=false
+# -p is a flag indicating the last positional arg is the prompt
+use_positional_prompt=false
+
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -p|--prompt|--dangerously-skip-permissions|--yes|-y)
+    -p)
+      # -p is just a flag, prompt comes as last positional argument
+      use_positional_prompt=true
       shift
       ;;
-    --output-format|--resume)
+    --prompt)
+      prompt="$2"
+      shift 2
+      ;;
+    --output-format)
+      output_format="$2"
       shift 2
       ;;
     --verbose)
+      verbose=true
+      shift
+      ;;
+    --yes|-y|--dangerously-skip-permissions|--resume)
       shift
       ;;
     *)
-      prompt="$1"
+      # If we're using positional prompt, the last arg is the prompt
+      if [[ $use_positional_prompt == true ]]; then
+        prompt="$1"
+      fi
       shift
       ;;
   esac
 done
 
+# Generate a mock session ID
+session_id="test-session-$(date +%s)-$$"
+
 # Mock responses based on prompt
 if [[ "$prompt" == *"error"* ]]; then
-  echo "Error: Mock error response" >&2
-  exit 1
+  if [[ "$output_format" == "json" ]]; then
+    echo '{"result": "Error: Mock error response", "is_error": true, "session_id": "'$session_id'"}'
+    exit 1
+  else
+    echo "Error: Mock error response" >&2
+    exit 1
+  fi
 elif [[ "$prompt" == *"create"* ]] || [[ "$prompt" == *"Create"* ]]; then
-  echo "Created file successfully"
+  if [[ "$output_format" == "json" ]]; then
+    echo '{"result": "Created file successfully", "session_id": "'$session_id'"}'
+  else
+    echo "Created file successfully"
+  fi
 elif [[ "$prompt" == *"git"* ]] && [[ "$prompt" == *"commit"* ]]; then
-  echo "Committed changes successfully"
+  if [[ "$output_format" == "json" ]]; then
+    echo '{"result": "Committed changes successfully", "session_id": "'$session_id'"}'
+  else
+    echo "Committed changes successfully"
+  fi
 else
-  echo "Command executed successfully"
+  if [[ "$output_format" == "json" ]]; then
+    echo '{"result": "Command executed successfully", "session_id": "'$session_id'"}'
+  else
+    echo "Command executed successfully"
+  fi
 fi
 `;
 
     writeFileSync(this.mockPath, mockScript);
-    // Make executable
-    const { chmod } = await import('node:fs/promises');
-    await chmod(this.mockPath, 0o755);
+    // Make executable - use sync to avoid race condition
+    chmodSync(this.mockPath, 0o755);
   }
 
   /**

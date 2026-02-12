@@ -42,7 +42,7 @@ describe('Error Handling Tests', () => {
 
   function setupServerMock() {
     errorHandler = null;
-    vi.mocked(Server).mockImplementation(() => {
+    vi.mocked(Server).mockImplementation(function() {
       const instance = {
         setRequestHandler: vi.fn(),
         connect: vi.fn(),

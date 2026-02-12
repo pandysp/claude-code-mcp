@@ -1,4 +1,7 @@
 import { ClaudeMock } from './claude-mock.js';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { getTestMockBaseDir } from './test-helpers.js';
 
 let sharedMock: ClaudeMock | null = null;
 
@@ -7,16 +10,26 @@ export async function getSharedMock(): Promise<ClaudeMock> {
     sharedMock = new ClaudeMock('claudeMocked');
   }
 
-  // Always overwrite the mock script to ensure it matches the current version.
-  // Skipping setup when the file exists risks running tests against a stale mock.
-  await sharedMock.setup();
+  // Always ensure mock exists and is executable
+  const mockPath = join(getTestMockBaseDir(), '.claude-code-test-mock', 'claudeMocked');
+  if (!existsSync(mockPath)) {
+    console.error(`[DEBUG] Mock not found at ${mockPath}, creating it...`);
+    await sharedMock.setup();
+    console.error(`[DEBUG] Mock created and made executable at ${mockPath}`);
+  } else {
+    console.error(`[DEBUG] Mock already exists at ${mockPath}`);
+    // Re-apply chmod to ensure it's executable in case permissions were lost
+    const { chmodSync } = await import('node:fs');
+    chmodSync(mockPath, 0o755);
+    console.error(`[DEBUG] Re-applied executable permissions to ${mockPath}`);
+  }
 
   return sharedMock;
 }
 
 export async function cleanupSharedMock(): Promise<void> {
-  // No-op: mock lives in /tmp and is safe to leave.
-  // Cleaning up here caused race conditions when vitest runs
-  // multiple test files in parallel that share the same mock.
-  sharedMock = null;
+  if (sharedMock) {
+    await sharedMock.cleanup();
+    sharedMock = null;
+  }
 }
